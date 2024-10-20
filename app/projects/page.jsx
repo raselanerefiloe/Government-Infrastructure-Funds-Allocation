@@ -1,9 +1,11 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import {Web3} from "web3"; 
+import { Web3 } from "web3"; 
 import FundsTrackerABI from "../../artifacts/contracts/FundsTracker.sol/FundsTracker.json";
 import { isAddress } from "web3-validator";
 import convertWeiToEther from "@/utils/ConvertWeiToEther";
+import Link from "next/link";
+import Loader from "@/components/Loader"; // Import the Loader component
 
 const Projects = () => {
   const [account, setAccount] = useState("");
@@ -12,6 +14,7 @@ const Projects = () => {
   const [projectBudget, setProjectBudget] = useState("");
   const [projectDescription, setProjectDescription] = useState(""); 
   const [contract, setContract] = useState(null);
+  const [loading, setLoading] = useState(true); // Loading state
   const [network, setNetwork] = useState("");
 
   useEffect(() => {
@@ -67,7 +70,7 @@ const Projects = () => {
         console.log("Smart contract instance created:", instance);
 
         setContract(instance);
-        fetchProjects(instance); // Pass the contract to fetch projects
+        await fetchProjects(instance); // Pass the contract to fetch projects
 
         setNetwork(network);
       } catch (error) {
@@ -80,21 +83,17 @@ const Projects = () => {
 
   const fetchProjects = async (contractInstance) => {
     if (contractInstance) {
+      setLoading(true); // Set loading to true before fetching
       try {
         console.log("Fetching projects...");
-        const projectCount = await contractInstance.methods.getProjectCount().call();
-        console.log("Number of projects:", projectCount);
-
-        const projectsArray = [];
-        for (let i = 0; i < projectCount; i++) {
-          const project = await contractInstance.methods.getProject(i).call();
-          console.log(`Project ${i}:`, project);
-          projectsArray.push(project);
-        }
-        console.log("All projects fetched:", projectsArray);
-        setProjects(projectsArray);
+        const projects = await contractInstance.methods.getAllProjects().call();
+        
+        console.log("All projects fetched:", projects);
+        setProjects(projects);
       } catch (error) {
         console.error("Error fetching projects:", error);
+      } finally {
+        setLoading(false); // Set loading to false after fetching
       }
     } else {
       console.warn("Contract instance is not defined. Cannot fetch projects.");
@@ -212,10 +211,14 @@ const Projects = () => {
     }
   };
 
+  // Show loader if loading state is true
+  if (loading) {
+    return <Loader />;
+  }
+
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="container mx-auto p-6">
-        <h1 className="text-3xl font-bold mb-4">Infrastructure Funds Tracker</h1>
         <h2 className="text-xl mb-2">Account: {account}</h2>
 
         <div className="bg-white shadow-md rounded-lg p-4 mb-4">
@@ -242,7 +245,7 @@ const Projects = () => {
           />
           <button
             onClick={createProject}
-            className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
+            className="bg-primary text-white p-2 rounded hover:bg-secondary"
           >
             Create Project
           </button>
@@ -267,10 +270,17 @@ const Projects = () => {
                 </p>
                 <button
                   onClick={() => fundProject(index)}
-                  className="bg-green-500 text-white p-2 rounded hover:bg-green-600"
+                  className="bg-greenlight text-white p-2 rounded hover:bg-green-400"
                 >
                   Fund Project
                 </button>
+                <Link href={`/projects/${index}`}>
+                  <button
+                    className="bg-secondary text-white p-2 rounded hover:bg-primary ml-2"
+                  >
+                    View Details
+                  </button>
+                </Link>
               </li>
             ))}
           </ul>

@@ -1,9 +1,9 @@
 "use client";
 import React, { useEffect, useState } from 'react';
-import {Web3} from 'web3';
+import { Web3 } from 'web3';
 import FundsTrackerABI from '../artifacts/contracts/FundsTracker.sol/FundsTracker.json'; 
 import { isAddress } from 'web3-validator'; 
-
+import Loader from '@/components/Loader'; // Import the Loader component
 
 const Home = () => {
   const [account, setAccount] = useState('');
@@ -12,6 +12,7 @@ const Home = () => {
   const [projectBudget, setProjectBudget] = useState('');
   const [contract, setContract] = useState(null);
   const [network, setNetwork] = useState('');
+  const [loading, setLoading] = useState(true); // Loading state
 
   useEffect(() => {
     const initWeb3 = async () => {
@@ -39,7 +40,7 @@ const Home = () => {
         );
         console.log("Web3 initialized with Infura provider.");
 
-           // Check if Web3 is injected by the browser (MetaMask)
+        // Check if Web3 is injected by the browser (MetaMask)
         if (window.ethereum) {
           window.web3 = new Web3(window.ethereum);
           await window.ethereum.request({ method: 'eth_requestAccounts' });
@@ -54,20 +55,19 @@ const Home = () => {
           }
 
           // Use the first account as the current account
-          setAccount(accounts[0]); // Assuming setAccount is a state setter for your account
+          setAccount(accounts[0]);
           console.log("Accounts fetched from MetaMask:", accounts);
-          } else {
-              console.error("MetaMask is not installed. Please install it to use this app.");
-              alert("MetaMask is not installed. Please install it to use this app.");
-          }
+        } else {
+          console.error("MetaMask is not installed. Please install it to use this app.");
+          alert("MetaMask is not installed. Please install it to use this app.");
+        }
 
         // Create the contract instance with the ABI and address from the environment variable
         const instance = new web3.eth.Contract(FundsTrackerABI.abi, contractAddress);
         console.log("Smart contract instance created:", instance);
 
         setContract(instance);
-        fetchProjects(instance); // Pass the contract to fetch projects
-
+        await fetchProjects(instance); // Pass the contract to fetch projects
         setNetwork(network);
       } catch (error) {
         console.error("Error initializing Web3 with Infura:", error);
@@ -79,6 +79,7 @@ const Home = () => {
 
   const fetchProjects = async (contractInstance) => {
     if (contractInstance) {
+      setLoading(true); // Set loading to true before fetching
       try {
         console.log("Fetching projects...");
         const projectCount = await contractInstance.methods.getProjectCount().call();
@@ -94,6 +95,8 @@ const Home = () => {
         setProjects(projectsArray);
       } catch (error) {
         console.error("Error fetching projects:", error);
+      } finally {
+        setLoading(false); // Set loading to false after fetching
       }
     } else {
       console.warn("Contract instance is not defined. Cannot fetch projects.");
@@ -101,51 +104,51 @@ const Home = () => {
   };
 
   const createProject = async () => {
-      try {
-        console.log("Account ", account, " Creating project with name:", projectName, "and budget:", projectBudget);
-  
-        // Validate the budget input
-        if (!projectBudget || isNaN(projectBudget) || parseFloat(projectBudget) <= 0) {
-          alert("Please enter a valid budget.");
-          return;
-        }
-  
-        // Convert the project budget from Ether to Wei
-        const budgetInWei = Web3.utils.toWei(projectBudget, 'ether');
-  
-        // Check if the account is valid using web3-validator
+    try {
+      console.log("Account ", account, " Creating project with name:", projectName, "and budget:", projectBudget);
+
+      // Validate the budget input
+      if (!projectBudget || isNaN(projectBudget) || parseFloat(projectBudget) <= 0) {
+        alert("Please enter a valid budget.");
+        return;
+      }
+
+      // Convert the project budget from Ether to Wei
+      const budgetInWei = Web3.utils.toWei(projectBudget, 'ether');
+
+      // Check if the account is valid using web3-validator
       if(!isAddress(account)) {
         alert("Invalid account address.");
         return;
       }
+
       // Connect to the Ethereum network
       const network = process.env.NEXT_PUBLIC_ETHEREUM_NETWORK;
       const web3 = new Web3(
-          new Web3.providers.HttpProvider(
-              `https://${network}.infura.io/v3/${process.env.NEXT_PUBLIC_INFURA_API_KEY}`
-          )
+        new Web3.providers.HttpProvider(
+          `https://${network}.infura.io/v3/${process.env.NEXT_PUBLIC_INFURA_API_KEY}`
+        )
       );
 
       // Create a signing account using the private key
       const signer = web3.eth.accounts.privateKeyToAccount(
         process.env.NEXT_PUBLIC_SIGNER_PRIVATE_KEY
-    );
-    web3.eth.accounts.wallet.add(signer);
+      );
+      web3.eth.accounts.wallet.add(signer);
 
       // Load the deployed contract instance using its ABI and address
       const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS; 
       const contract = new web3.eth.Contract(FundsTrackerABI.abi, contractAddress);
-      
-        // Sending the transaction via MetaMask
-        await contract.methods.createProject(projectName, budgetInWei, signer.address).send({ from: account, gas: 300000 });
-  
-        alert('Project created!');
-        fetchProjects(contract); // Refresh projects after creating a new one
-      } catch (error) {
-        console.error("Error creating project:", error);
-      }
-  };
 
+      // Sending the transaction via MetaMask
+      await contract.methods.createProject(projectName, budgetInWei, signer.address).send({ from: account, gas: 300000 });
+
+      alert('Project created!');
+      fetchProjects(contract); // Refresh projects after creating a new one
+    } catch (error) {
+      console.error("Error creating project:", error);
+    }
+  };
 
   const donateToProject = async (projectId) => {
     const donationAmount = prompt("Enter donation amount in Ether:");
@@ -162,6 +165,11 @@ const Home = () => {
       console.warn("Contract instance is not defined or donation amount is invalid.");
     }
   };
+
+  // Show loader if loading state is true
+  if (loading) {
+    return <Loader />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -180,7 +188,7 @@ const Home = () => {
           />
           <input
             type="number"
-            placeholder="Budget (in Wei)"
+            placeholder="Budget (in Ether)"
             className="border border-gray-300 rounded p-2 w-full mb-2"
             value={projectBudget}
             onChange={(e) => setProjectBudget(e.target.value)}

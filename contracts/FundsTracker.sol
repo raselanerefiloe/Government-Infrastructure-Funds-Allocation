@@ -3,11 +3,8 @@ pragma solidity ^0.8.27;
 
 contract UserRoleManagement {
     address public owner;
-
-    // Mapping of user addresses to their roles
     mapping(address => bytes32) public roles;
 
-    // Define role constants using keccak256
     bytes32 public constant CONTRACTOR_ROLE = keccak256("contractor");
     bytes32 public constant MANAGER_ROLE = keccak256("manager");
     bytes32 public constant OWNER_ROLE = keccak256("owner");
@@ -17,30 +14,28 @@ contract UserRoleManagement {
     event RoleAssigned(address indexed user, bytes32 role);
     event RoleRevoked(address indexed user, bytes32 role);
 
+    address[] public userList;
+
     constructor() {
         owner = msg.sender;
         roles[owner] = OWNER_ROLE;
+        userList.push(owner);
     }
 
     modifier onlyOwner() {
-        require(
-            msg.sender == owner,
-            "Not authorized: Only owner can perform this action"
-        );
+        require(msg.sender == owner, "Not authorized: Only owner");
         _;
     }
 
     modifier onlyRole(bytes32 role) {
-        require(
-            roles[msg.sender] == role,
-            "Not authorized: You do not have the required role"
-        );
+        require(roles[msg.sender] == role, "Not authorized: Invalid role");
         _;
     }
 
     function addUser(address user) external onlyOwner {
         require(user != address(0), "Invalid address");
-        roles[user] = USER_ROLE; // Assign a general user role
+        roles[user] = USER_ROLE;
+        userList.push(user);
         emit UserAdded(user);
     }
 
@@ -60,13 +55,23 @@ contract UserRoleManagement {
     function hasRole(address user, bytes32 role) external view returns (bool) {
         return roles[user] == role;
     }
+
+    function getAllUsers() external view returns (address[] memory, bytes32[] memory) {
+        bytes32[] memory userRoles = new bytes32[](userList.length);
+        for (uint256 i = 0; i < userList.length; i++) {
+            userRoles[i] = roles[userList[i]];
+        }
+        return (userList, userRoles);
+    }
 }
 
 contract FundsTracker is UserRoleManagement {
     struct Expense {
-        uint256 projectId; // ID of the project associated with this expense
+        uint256 projectId;
         string description;
         uint256 amount;
+        uint256 itemQuantity;
+        address payable walletAddress;
         uint256 timestamp;
     }
 
@@ -76,112 +81,71 @@ contract FundsTracker is UserRoleManagement {
         uint256 amountReceived;
         bool funded;
         address payable government;
-        uint256 startDate; // Start date (set after contractor is assigned)
-        uint256 endDate; // End date (set after contractor is assigned)
+        uint256 startDate;
+        uint256 endDate;
         string description;
     }
 
     struct Contractor {
-        uint256 id; // Unique ID for the contractor
-        string name; // Name of the contractor
-        // Additional fields related to contractor can be added here
+        string name;
+        string description;
+        string services;
+        address payable walletAddress;
+        uint8 rating; // rating can remain as uint8 (1-5)
     }
 
-    Project[] public projects; // Array to hold all projects
-    Contractor[] public contractors; // Array to hold all contractors
+    struct Payment {
+        uint256 amount;
+        uint256 projectId;
+        uint256 contractorId;
+        string description;
+        uint256 timestamp;
+    }
 
-    // Mapping from project ID to contractor ID
-    mapping(uint256 => uint256) public projectContractors; // projectId => contractorId
-
-    // Mapping from project ID to expenses
+    Contractor[] public contractors;
+    Project[] public projects;
+    mapping(uint256 => uint256) public projectContractors;
     mapping(uint256 => Expense[]) public projectExpenses;
+    Payment[] public payments;
 
-    event ProjectCreated(
-        uint256 projectId,
-        string name,
-        uint256 budget,
-        address government
-    );
+    event ProjectCreated(uint256 projectId, string name, uint256 budget, address government);
     event FundsReceived(uint256 projectId, uint256 amount);
     event ProjectFunded(uint256 projectId);
     event ContractorAssigned(uint256 projectId, uint256 contractorId);
-    event ProjectDatesSet(
-        uint256 projectId,
-        uint256 startDate,
-        uint256 endDate
-    );
+    event ProjectDatesSet(uint256 projectId, uint256 startDate, uint256 endDate);
     event ExpenseLogged(uint256 projectId, string description, uint256 amount);
     event ContractorCreated(uint256 contractorId, string name);
+    event PaymentMade(uint256 paymentId, uint256 amount, uint256 projectId, uint256 contractorId, string description);
 
     constructor() UserRoleManagement() {}
 
-    function createProject(
-        string calldata name,
-        uint256 budget,
-        address payable government,
-        string calldata description
-    ) external {
-        require(
-            roles[msg.sender] == MANAGER_ROLE ||
-                roles[msg.sender] == OWNER_ROLE,
-            "Not authorized: Only manager or owner can create projects"
-        );
+    function createProject(string calldata name, uint256 budget, address payable government, string calldata description) external {
+        require(roles[msg.sender] == MANAGER_ROLE || roles[msg.sender] == OWNER_ROLE, "Not authorized");
         require(government != address(0), "Invalid government address");
 
-        // Initialize a new project and push it to the projects array
-        projects.push(
-            Project({
-                name: name,
-                budget: budget,
-                amountReceived: 0,
-                funded: false,
-                government: government,
-                startDate: 0,
-                endDate: 0,
-                description: description
-            })
-        );
+        projects.push(Project(name, budget, 0, false, government, 0, 0, description));
         emit ProjectCreated(projects.length - 1, name, budget, government);
     }
 
-    // Function to create a new contractor
-    function createContractor(
-        string calldata name
-    ) external onlyRole(MANAGER_ROLE) {
-        uint256 contractorId = contractors.length; // Generate a unique ID for the contractor
-        contractors.push(Contractor({id: contractorId, name: name}));
-        emit ContractorCreated(contractorId, name);
+    function createContractor(string memory _name, string memory _description, string memory _services, address payable _walletAddress) public {
+        contractors.push(Contractor(_name, _description, _services, _walletAddress, 0));
+        emit ContractorCreated(contractors.length - 1, _name);
     }
 
-    // Function to assign a contractor to a project
-    function assignContractor(
-        uint256 projectId,
-        uint256 contractorId
-    ) external onlyRole(MANAGER_ROLE) {
+    function assignContractor(uint256 projectId, uint256 contractorId) external {
+        require(roles[msg.sender] == MANAGER_ROLE || roles[msg.sender] == OWNER_ROLE, "Not authorized");
         require(projectId < projects.length, "Project does not exist");
         require(contractorId < contractors.length, "Contractor does not exist");
-
-        projectContractors[projectId] = contractorId; // Associate the contractor with the project
+        projectContractors[projectId] = contractorId;
         emit ContractorAssigned(projectId, contractorId);
     }
 
-    function setProjectDates(
-        uint256 projectId,
-        uint256 startDate,
-        uint256 endDate
-    ) external {
+    function setProjectDates(uint256 projectId, uint256 startDate, uint256 endDate) external {
         require(projectId < projects.length, "Project does not exist");
-
-        // Retrieve the contractor ID from the mapping
-        uint256 contractorId = projectContractors[projectId];
-        require(
-            contractors[contractorId].id == contractorId,
-            "Only the assigned contractor can set project dates"
-        );
+        require(roles[msg.sender] == MANAGER_ROLE || roles[msg.sender] == OWNER_ROLE, "Unauthorized");
         require(startDate < endDate, "Start date must be before end date");
-
-        projects[projectId].startDate = startDate; // Set the project start date
-        projects[projectId].endDate = endDate; // Set the project end date
+        projects[projectId].startDate = startDate;
+        projects[projectId].endDate = endDate;
         emit ProjectDatesSet(projectId, startDate, endDate);
     }
 
@@ -191,70 +155,84 @@ contract FundsTracker is UserRoleManagement {
 
         Project storage project = projects[projectId];
         project.amountReceived += msg.value;
-
         emit FundsReceived(projectId, msg.value);
-
-        // Transfer the funds to the project government immediately upon donation
         project.government.transfer(msg.value);
-
-        // Set the project as funded regardless of the amount received
         project.funded = true;
-
         emit ProjectFunded(projectId);
     }
 
-    // Function to log an expense against a project (only managers can log expenses)
-    function logExpense(
-        uint256 projectId,
-        string calldata description,
-        uint256 amount
-    ) external onlyRole(MANAGER_ROLE) {
+    function logExpense(uint256 projectId, string calldata description, uint256 amount, uint256 itemQuantity, address payable walletAddress) external {
         require(projectId < projects.length, "Project does not exist");
         require(amount > 0, "Invalid amount");
+        require(itemQuantity > 0, "Invalid item quantity");
+        require(walletAddress != address(0), "Invalid wallet address");
+        require(roles[msg.sender] == MANAGER_ROLE || roles[msg.sender] == OWNER_ROLE, "Unauthorized");
+        
+        Project storage project = projects[projectId];
+        require(project.amountReceived >= amount, "Insufficient funds");
 
-        projectExpenses[projectId].push(
-            Expense({
-                projectId: projectId, // Assign the project ID to the expense
-                description: description,
-                amount: amount,
-                timestamp: block.timestamp
-            })
-        );
-
+        project.government.transfer(amount);
+        projectExpenses[projectId].push(Expense(projectId, description, amount, itemQuantity, walletAddress, block.timestamp));
         emit ExpenseLogged(projectId, description, amount);
     }
 
-    // Function to get project details
-    function getProject(
-        uint256 projectId
-    ) external view returns (Project memory) {
+    function payContractor(uint256 projectId, uint256 contractorId, uint256 amount, string calldata description) external {
+        require(roles[msg.sender] == MANAGER_ROLE || roles[msg.sender] == OWNER_ROLE, "Not authorized");
         require(projectId < projects.length, "Project does not exist");
-        return projects[projectId];
+        require(contractorId < contractors.length, "Contractor does not exist");
+        require(amount > 0, "Amount must be greater than zero");
+
+        Project storage project = projects[projectId];
+        require(project.amountReceived >= amount, "Insufficient funds");
+
+        project.government.transfer(amount);
+        contractors[contractorId].walletAddress.transfer(amount);
+
+        payments.push(Payment(amount, projectId, contractorId, description, block.timestamp));
+        emit PaymentMade(payments.length - 1, amount, projectId, contractorId, description);
     }
 
-    // Function to get expenses for a specific project
-    function getProjectExpenses(
-        uint256 projectId
-    ) external view returns (Expense[] memory) {
+    function getPaymentsByProjectId(uint256 projectId) external view returns (Payment[] memory) {
+        require(projectId < projects.length, "Project does not exist");
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < payments.length; i++) {
+            if (payments[i].projectId == projectId) {
+                count++;
+            }
+        }
+
+        Payment[] memory projectPayments = new Payment[](count);
+        uint256 index = 0;
+
+        for (uint256 i = 0; i < payments.length; i++) {
+            if (payments[i].projectId == projectId) {
+                projectPayments[index] = payments[i];
+                index++;
+            }
+        }
+
+        return projectPayments;
+    }
+
+    function getExpensesByProjectId(uint256 projectId) external view returns (Expense[] memory) {
         require(projectId < projects.length, "Project does not exist");
         return projectExpenses[projectId];
     }
-
-    // Function to get the count of projects
-    function getProjectCount() external view returns (uint256) {
-        return projects.length;
+    // Function to fetch all projects
+    function getAllProjects() public view returns (Project[] memory) {
+        return projects;
     }
 
-    // Function to get the count of contractors
-    function getContractorCount() external view returns (uint256) {
-        return contractors.length;
+    // Function to fetch all contractors
+    function getAllContractors() public view returns (Contractor[] memory) {
+        return contractors;
     }
-
-    // Function to get contractor details
-    function getContractor(
-        uint256 contractorId
-    ) external view returns (Contractor memory) {
-        require(contractorId < contractors.length, "Contractor does not exist");
+    // Function to get the contractor associated with a project
+    function getContractorByProjectId(uint256 projectId) external view returns (Contractor memory) {
+        require(projectId < projects.length, "Project does not exist");
+        uint256 contractorId = projectContractors[projectId];
+        require(contractorId < contractors.length, "No contractor assigned to this project");
         return contractors[contractorId];
     }
 }
