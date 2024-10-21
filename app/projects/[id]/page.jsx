@@ -2,7 +2,7 @@
 "use client";
 import React, { useEffect, useState, useCallback } from 'react';
 import Web3 from 'web3'; // Ensure Web3 is imported correctly
-import FundsTrackerABI from '../../../artifacts/contracts/FundsTracker.sol/FundsTracker.json';
+import FundsTrackerABI from "../../../artifacts/contracts/InfrastructureFunds.sol/InfrastructureFunds.json";
 import convertWeiToEther from '@/utils/ConvertWeiToEther';
 import Loader from '@/components/Loader';
 
@@ -40,7 +40,8 @@ const ProjectDetails = ({ params }) => {
         const projects = await instance.methods.getAllProjects().call();
         console.log(projects)
         // filter by id
-        const projectData = projects[id];
+        const idToFind = BigInt(id);
+        const projectData = projects.find(project => project.id === idToFind);
         setProject(projectData);
 
         // Fetch project contractors
@@ -119,7 +120,6 @@ const ProjectDetails = ({ params }) => {
     <div className="container mx-auto p-6">
       <h1 className="text-3xl font-bold mb-4">{project.name}</h1>
       <p><strong>Budget:</strong> {convertWeiToEther(project.budget)} Ether</p>
-      <p><strong>Amount Received:</strong> {convertWeiToEther(project.amountReceived)} Ether</p>
       <p><strong>Description:</strong> {project.description}</p>
       <p><strong>Funded:</strong> {project.funded ? "Yes" : "No"}</p>
 

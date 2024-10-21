@@ -268,7 +268,7 @@ const Projects = () => {
                 >
                   Fund Project
                 </button>
-                <Link href={`/projects/${index}`}>
+                <Link href={`/projects/${project.id}`}>
                   <button
                     className="bg-secondary text-white p-2 rounded hover:bg-primary ml-2"
                   >
