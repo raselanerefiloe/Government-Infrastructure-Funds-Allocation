@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useState } from 'react';
 import { Web3 } from 'web3';
-import FundsTrackerABI from '../artifacts/contracts/FundsTracker.sol/FundsTracker.json'; 
+import FundsTrackerABI from "../../artifacts/contracts/InfrastructureFunds.sol/InfrastructureFunds.json";
 import { isAddress } from 'web3-validator'; 
 import Loader from '@/components/Loader'; // Import the Loader component
 
@@ -141,7 +141,7 @@ const Home = () => {
       const contract = new web3.eth.Contract(FundsTrackerABI.abi, contractAddress);
 
       // Sending the transaction via MetaMask
-      await contract.methods.createProject(projectName, budgetInWei, signer.address).send({ from: account, gas: 300000 });
+      await contract.methods.createProject(projectName, budgetInWei, signer.address).send({ from: signer.address, gas: 300000 });
 
       alert('Project created!');
       fetchProjects(contract); // Refresh projects after creating a new one

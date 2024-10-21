@@ -1,11 +1,12 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { Web3 } from "web3"; 
-import FundsTrackerABI from "../../artifacts/contracts/FundsTracker.sol/FundsTracker.json";
+import FundsTrackerABI from "../../artifacts/contracts/InfrastructureFunds.sol/InfrastructureFunds.json";
 import { isAddress } from "web3-validator";
 import convertWeiToEther from "@/utils/ConvertWeiToEther";
 import Link from "next/link";
 import Loader from "@/components/Loader"; // Import the Loader component
+import { addProjectToAppwriteCollection } from '../appwrite'
 
 const Projects = () => {
   const [account, setAccount] = useState("");
@@ -102,55 +103,49 @@ const Projects = () => {
 
   const createProject = async () => {
     try {
-      // Validate the budget input
-      if (
-        !projectBudget ||
-        isNaN(projectBudget) ||
-        parseFloat(projectBudget) <= 0
-      ) {
-        alert("Please enter a valid budget.");
+      if (!projectName || !projectBudget) {
+        alert("Please enter a valid project name and budget.");
         return;
       }
 
-      // Convert the project budget from Ether to Wei
-      const budgetInWei = Web3.utils.toWei(projectBudget, "ether");
+      const web3 = new Web3(window.ethereum); // Use MetaMask's provider
+      const budgetInWei = web3.utils.toWei(projectBudget, "ether"); // Convert budget to Wei
 
-      // Check if the account is valid using web3-validator
-      if (!isAddress(account)) {
-        alert("Invalid account address.");
+      if (!account) {
+        alert("Account not found. Please connect to MetaMask.");
         return;
       }
-      // Connect to the Ethereum network
-      const network = process.env.NEXT_PUBLIC_ETHEREUM_NETWORK;
-      const web3 = new Web3(
-        new Web3.providers.HttpProvider(
-          `https://${network}.infura.io/v3/${process.env.NEXT_PUBLIC_INFURA_API_KEY}`
-        )
-      );
+      // Request accounts access from MetaMask
+    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    const userAccount = accounts[0];
 
-      // Create a signing account using the private key
-      const signer = web3.eth.accounts.privateKeyToAccount(
-        process.env.NEXT_PUBLIC_SIGNER_PRIVATE_KEY
-      );
-      web3.eth.accounts.wallet.add(signer);
+    // Load the deployed contract instance using its ABI and address
+    const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+    const contract = new web3.eth.Contract(FundsTrackerABI.abi, contractAddress);
 
-      // Load the deployed contract instance using its ABI and address
-      const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
-      const contract = new web3.eth.Contract(
-        FundsTrackerABI.abi,
-        contractAddress
-      );
-      // Load Government Address
-      const governmentAddress = process.env.NEXT_PUBLIC_GOVERNMENT_ADDRESS;
-      // Sending the transaction via MetaMask
-      await contract.methods
-        .createProject(projectName, budgetInWei, governmentAddress, projectDescription)
-        .send({ from: signer.address, gas: 300000 });
+    // Interact with the contract to create the project
+    const transactionReceipt = await contract.methods.createProject(projectName).send({
+      from: userAccount, // Use the user's MetaMask account
+      value: budgetInWei, // Budget in Wei must be included in the transaction
+      gas: 300000,
+    });
+    console.log("TranscactionReceipt: ", transactionReceipt)
+    // Get the project ID from the transaction receipt (optional if the ID is available from contract events)
+    const projectId = transactionReceipt.events.ProjectCreated.returnValues.projectId;
+    console.log("Project created on blockchain with ID:", projectId);
 
-      alert("Project created!");
-      fetchProjects(contract); // Refresh projects after creating a new one
+    // Now, add the project to the Appwrite collection
+    await addProjectToAppwriteCollection(projectName, projectDescription, projectId);
+
+
+      alert("Project created successfully!");
+      setProjectName(""); // Reset form fields after successful creation
+      setProjectBudget("");
+      setProjectDescription("");
+      fetchProjects(contract); // Refresh project list
     } catch (error) {
       console.error("Error creating project:", error);
+      alert("Failed to create project. Please check the console for more details.");
     }
   };
 
@@ -257,8 +252,7 @@ const Projects = () => {
             {projects.map((project, index) => (
               <li key={index} className="p-4 border border-gray-200 rounded-lg">
                 <strong className="block text-lg">{project.name}</strong>
-                <p>Budget: {convertWeiToEther(project.budget)} Ether</p>
-                <p>Amount Received: {convertWeiToEther(project.amountReceived)} Ether</p>
+                <p>Budget: {convertWeiToEther(project.budget)} ETH</p>
                 <p>Description: {project.description}</p> {/* Displaying project description */}
                 <p>
                   Funded:{" "}
