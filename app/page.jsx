@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useState } from 'react';
 import { Web3 } from 'web3';
-import FundsTrackerABI from "../../artifacts/contracts/InfrastructureFunds.sol/InfrastructureFunds.json";
+import FundsTrackerABI from "../artifacts/contracts/InfrastructureFunds.sol/InfrastructureFunds.json";
 import { isAddress } from 'web3-validator'; 
 import Loader from '@/components/Loader'; // Import the Loader component
 

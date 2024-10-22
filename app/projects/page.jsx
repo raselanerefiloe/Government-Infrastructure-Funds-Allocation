@@ -84,20 +84,42 @@ const Projects = () => {
 
   const fetchProjects = async (contractInstance) => {
     if (contractInstance) {
-      setLoading(true); // Set loading to true before fetching
+      setLoading(true);
       try {
-        console.log("Fetching projects...");
         const projects = await contractInstance.methods.getAllProjects().call();
-        
-        console.log("All projects fetched:", projects);
-        setProjects(projects);
+        const enrichedProjects = await Promise.all(
+          projects.map(async (project) => {
+            const totalFunds = await fetchTotalContributions(project.id); 
+            return { ...project, amountReceived: totalFunds };
+          })
+        );
+
+        setProjects(enrichedProjects);
       } catch (error) {
         console.error("Error fetching projects:", error);
       } finally {
-        setLoading(false); // Set loading to false after fetching
+        setLoading(false);
       }
-    } else {
-      console.warn("Contract instance is not defined. Cannot fetch projects.");
+    }
+  };
+
+  // Function to fetch total contributions for a specific project
+  const fetchTotalContributions = async (projectId) => {
+    try {
+      const contributions = await contract.methods
+        .getContributionsByProjectId(projectId)
+        .call();
+      
+      // Sum all contributions in Wei
+      const totalWei = contributions.reduce((acc, contribution) => {
+        return acc + parseFloat(contribution.amount);
+      }, 0);
+
+      // Convert Wei to Ether for display
+      return Web3.utils.fromWei(totalWei.toString(), "ether");
+    } catch (error) {
+      console.error(`Error fetching contributions for project ${projectId}:`, error);
+      return "0";
     }
   };
 
@@ -109,7 +131,6 @@ const Projects = () => {
       }
 
       const web3 = new Web3(window.ethereum); // Use MetaMask's provider
-      const budgetInWei = web3.utils.toWei(projectBudget, "ether"); // Convert budget to Wei
 
       if (!account) {
         alert("Account not found. Please connect to MetaMask.");
@@ -124,9 +145,8 @@ const Projects = () => {
     const contract = new web3.eth.Contract(FundsTrackerABI.abi, contractAddress);
 
     // Interact with the contract to create the project
-    const transactionReceipt = await contract.methods.createProject(projectName).send({
+    const transactionReceipt = await contract.methods.createProject(projectName, projectBudget).send({
       from: userAccount, // Use the user's MetaMask account
-      value: budgetInWei, // Budget in Wei must be included in the transaction
       gas: 300000,
     });
     console.log("TranscactionReceipt: ", transactionReceipt)
@@ -151,60 +171,45 @@ const Projects = () => {
 
   const fundProject = async (projectId) => {
     try {
-      // Prompt the user for the donation amount in Ether
-      const donationAmount = prompt("Enter donation amount in Ether:");
-
-      // Validate the donation amount input
-      if (!donationAmount || isNaN(donationAmount) || parseFloat(donationAmount) <= 0) {
+      if (!account) {
+        alert("Account not found. Please connect to MetaMask.");
+        return;
+      }
+  
+      // Ask the user how much Ether they want to donate
+      const amountInEther = prompt("Enter the amount of Ether you want to donate:");
+  
+      if (!amountInEther || isNaN(amountInEther) || parseFloat(amountInEther) <= 0) {
         alert("Please enter a valid donation amount.");
         return;
       }
-
-      // Check if the browser has a web3 provider (like MetaMask)
-      if (typeof window.ethereum === "undefined") {
-        alert("Please install MetaMask or another Ethereum wallet to proceed.");
-        return;
-      }
-
-      // Request access to the user's Ethereum accounts
-      await window.ethereum.request({ method: "eth_requestAccounts" });
-      const web3 = new Web3(window.ethereum);
-
-      // Get the current user's account
-      const accounts = await web3.eth.getAccounts();
-      const userAccount = accounts[0];
-
-      // Validate the user's account address
-      if (!isAddress(userAccount)) {
-        alert("Invalid account address.");
-        return;
-      }
-
-      // Load the deployed contract instance using its ABI and address
+  
+      const web3 = new Web3(window.ethereum); // Use MetaMask's provider
+      const amountInWei = web3.utils.toWei(amountInEther, "ether"); // Convert donation amount to Wei
+  
+      // Load the contract instance
       const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
       const contract = new web3.eth.Contract(FundsTrackerABI.abi, contractAddress);
-
-      // Convert the donation amount from Ether to Wei
-      const donationAmountInWei = web3.utils.toWei(donationAmount, "ether");
-
-      // Send the donation transaction from the user's account
-      await contract.methods.donate(projectId).send({
-        from: userAccount,
-        value: donationAmountInWei,
-        gas: 300000,
+  
+      // Send the funds to the contract for the specific project
+      const transactionReceipt = await contract.methods.receiveFunds(projectId).send({
+        from: account, // Use the user's MetaMask account
+        value: amountInWei, // Send the donation in Wei
+        gas: 300000, // Set an appropriate gas limit
       });
-
-      alert("Donation successful!");
-      fetchProjects(contract); // Refresh projects after donation
+  
+      console.log("Transaction successful:", transactionReceipt);
+  
+      // Refresh the project list after funding
+      fetchProjects(contract);
+  
+      alert(`You have successfully donated ${amountInEther} ETH to Project ID: ${projectId}`);
     } catch (error) {
-      if (error.message.includes("User denied transaction signature")) {
-        alert("Transaction denied by user.");
-      } else {
-        console.error("Error making a donation:", error);
-        alert("Failed to make a donation. Please try again.");
-      }
+      console.error("Error funding project:", error);
+      alert("Failed to fund the project. Please check the console for more details.");
     }
   };
+  
 
   // Show loader if loading state is true
   if (loading) {
@@ -253,7 +258,7 @@ const Projects = () => {
               <li key={index} className="p-4 border border-gray-200 rounded-lg">
                 <strong className="block text-lg">{project.name}</strong>
                 <p>Budget: {convertWeiToEther(project.budget)} ETH</p>
-                <p>Description: {project.description}</p> {/* Displaying project description */}
+                <p>Funds Received: {project.amountReceived} ETH</p>
                 <p>
                   Funded:{" "}
                   {project.funded
@@ -263,7 +268,7 @@ const Projects = () => {
                     : "No"}
                 </p>
                 <button
-                  onClick={() => fundProject(index)}
+                  onClick={() => fundProject(project.id)}
                   className="bg-greenlight text-white p-2 rounded hover:bg-green-400"
                 >
                   Fund Project

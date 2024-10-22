@@ -5,8 +5,7 @@ const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 require("dotenv").config();
 
 module.exports = buildModule("InfrastructureFundsModule", (m) => {
-  const governmentAddress = process.env.NEXT_PUBLIC_GOVERNMENT_ADDRESS;
 
-  const fundsTracker = m.contract("InfrastructureFunds", [governmentAddress]);
+  const fundsTracker = m.contract("InfrastructureFunds");
   return { fundsTracker };
 });

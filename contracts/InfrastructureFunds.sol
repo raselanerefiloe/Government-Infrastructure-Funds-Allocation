@@ -19,14 +19,22 @@ contract InfrastructureFunds {
         uint256 amount; // stored in wei
     }
 
-    address public governmentWallet;
+    struct Contribution {
+        uint256 projectId; // Include projectId in the struct
+        address contributor;
+        uint256 amount; // stored in wei
+        uint256 timestamp;
+    }
+
     mapping(uint256 => Project) public projects;
     mapping(uint256 => Expense) public expenses;
-    mapping(address => uint256) public contributions; // Total contributions per address
-    mapping(uint256 => uint256) public projectContributions; // Contributions per project
+    mapping(uint256 => Contribution[]) public projectContributions; // Contributions per project
 
     uint256 public projectCount;
     uint256 public expenseCount;
+
+    // Use a multiplier to simulate floating-point values with 18 decimal precision
+    uint256 private constant DECIMALS = 1e18; // 10^18 for 18 decimal places
 
     event ProjectCreated(uint256 projectId, string name, address contractor, uint256 budget);
     event ContractorAssigned(uint256 projectId, address contractor);
@@ -34,18 +42,29 @@ contract InfrastructureFunds {
     event ContractorPaid(uint256 projectId, address contractor, uint256 amount);
     event ExpenseIncurred(uint256 projectId, uint256 expenseId, string description, uint256 amount);
 
-    constructor(address _governmentWallet) {
-        governmentWallet = _governmentWallet;
-    }
+    constructor() {}
 
-    // Function to create a project with a budget in ETH
-    function createProject(string memory _name) external payable {
-        require(msg.value > 0, "Budget must be greater than 0");
+    // Function to create a project with a specified budget (supports decimals as wei)
+    function createProject(string memory _name, uint256 _budgetInEther) external {
+        require(_budgetInEther > 0, "Budget must be greater than 0");
+
+        // Convert _budgetInEther to wei (fixed-point arithmetic)
+        uint256 budgetInWei = _budgetInEther * DECIMALS;
 
         projectCount++;
-        projects[projectCount] = Project(projectCount, _name, address(0), msg.value, 0, false, false);
-        emit ProjectCreated(projectCount, _name, address(0), msg.value);
+        projects[projectCount] = Project(
+            projectCount,
+            _name,
+            address(0),
+            budgetInWei, // Store budget in wei
+            0,
+            false,
+            false
+        );
+
+        emit ProjectCreated(projectCount, _name, address(0), budgetInWei);
     }
+
 
     // Function to assign a contractor to a project
     function assignContractor(uint256 _projectId, address _contractor) external {
@@ -56,51 +75,70 @@ contract InfrastructureFunds {
         emit ContractorAssigned(_projectId, _contractor);
     }
 
-    // Function to receive funds for a specific project
+    // Function to receive funds for a specific project and store contribution details
     function receiveFunds(uint256 _projectId) external payable {
         require(msg.value > 0, "Must send funds");
         require(projects[_projectId].id != 0, "Project does not exist");
 
-        contributions[msg.sender] += msg.value;
-        projectContributions[_projectId] += msg.value;
+        // Store contribution details with projectId
+        projectContributions[_projectId].push(Contribution({
+            projectId: _projectId,
+            contributor: msg.sender,
+            amount: msg.value,
+            timestamp: block.timestamp
+        }));
 
-        // If the project receives funding, set funded to true
-        if (projectContributions[_projectId] > 0) {
-            projects[_projectId].funded = true;
-        }
+        // Mark project as funded if contributions are made
+        projects[_projectId].funded = true;
 
         emit FundsReceived(msg.sender, msg.value, _projectId);
     }
 
     // Function to pay a contractor with ETH
-    function payContractor(uint256 _projectId) external payable {
+    // Function to pay a contractor from the contract's balance
+    function payContractor(uint256 _projectId, uint256 _amountInEther) external {
         require(projects[_projectId].contractor != address(0), "Contractor not assigned");
-        require(msg.value > 0, "Amount must be greater than 0");
-        require(projects[_projectId].spent + msg.value <= projects[_projectId].budget, "Exceeds budget");
+        require(_amountInEther > 0, "Amount must be greater than 0");
+        require(projects[_projectId].spent + _amountInEther <= projects[_projectId].budget, "Exceeds budget");
+        require(address(this).balance >= _amountInEther, "Insufficient contract balance");
+
+        // Convert _amountInEther to wei (fixed-point arithmetic)
+        uint256 amountInWei = _amountInEther * DECIMALS;
 
         // Record the payment as an expense
         expenseCount++;
-        expenses[expenseCount] = Expense(_projectId, expenseCount, "Payment to Contractor", msg.value);
-        projects[_projectId].spent += msg.value;
+        expenses[expenseCount] = Expense(_projectId, expenseCount, "Payment to Contractor", amountInWei);
+        projects[_projectId].spent += amountInWei;
 
-        // Transfer funds to the contractor
-        payable(projects[_projectId].contractor).transfer(msg.value);
-        emit ContractorPaid(_projectId, projects[_projectId].contractor, msg.value);
-        emit ExpenseIncurred(_projectId, expenseCount, "Payment to Contractor", msg.value);
+        // Transfer funds to the contractor from the contract's balance
+        payable(projects[_projectId].contractor).transfer(amountInWei);
+
+        emit ContractorPaid(_projectId, projects[_projectId].contractor, amountInWei);
+        emit ExpenseIncurred(_projectId, expenseCount, "Payment to Contractor", amountInWei);
     }
 
-    // Function to incur an expense for a project with ETH
-    function incurExpense(uint256 _projectId, string memory _description) external payable {
+
+    // Function to incur an expense for a project and pay to a specified address
+    function incurExpense(uint256 _projectId, string memory _description, address _payee, uint256 _amountInEther) external {
         require(projects[_projectId].id != 0, "Project does not exist");
-        require(msg.value > 0, "Expense must be greater than 0");
-        require(projects[_projectId].spent + msg.value <= projects[_projectId].budget, "Exceeds budget");
+        require(_amountInEther > 0, "Expense must be greater than 0");
+        require(projects[_projectId].spent + _amountInEther <= projects[_projectId].budget, "Exceeds budget");
+        require(address(this).balance >= _amountInEther, "Insufficient contract balance");
 
+        // Convert _amountInEther to wei (fixed-point arithmetic)
+        uint256 amountInWei = _amountInEther * DECIMALS;
+
+        // Record the payment as an expense
         expenseCount++;
-        expenses[expenseCount] = Expense(_projectId, expenseCount, _description, msg.value);
-        projects[_projectId].spent += msg.value;
+        expenses[expenseCount] = Expense(_projectId, expenseCount, _description, amountInWei);
+        projects[_projectId].spent += amountInWei;
 
-        emit ExpenseIncurred(_projectId, expenseCount, _description, msg.value);
+        // Transfer funds from the contract balance to the specified payee address
+        payable(_payee).transfer(amountInWei); // Transfer the specified amount to the payee
+
+        emit ExpenseIncurred(_projectId, expenseCount, _description, amountInWei);
     }
+
 
     // Function to get all expenses by project ID
     function getAllExpensesByProjectId(uint256 _projectId) external view returns (Expense[] memory) {
@@ -145,5 +183,45 @@ contract InfrastructureFunds {
             allExpenses[i - 1] = expenses[i];
         }
         return allExpenses;
+    }
+
+    // Function to retrieve all contributions for a specific project by its project ID
+    function getContributionsByProjectId(uint256 _projectId)
+        external
+        view
+        returns (Contribution[] memory)
+    {
+        require(projects[_projectId].id != 0, "Project does not exist");
+
+        // Return the contributions for the specified project
+        return projectContributions[_projectId];
+    }
+
+    // Function to get the total contributions made by all contributors
+    function getAllContributions() external view returns (Contribution[] memory) {
+        // Calculate total number of contributions across all projects
+        uint256 totalContributions = 0;
+        for (uint256 i = 1; i <= projectCount; i++) {
+            totalContributions += projectContributions[i].length;
+        }
+
+        // Create an array to hold all contributions
+        Contribution[] memory allContributions = new Contribution[](totalContributions);
+        uint256 index = 0;
+
+        // Loop through each project to collect contributions
+        for (uint256 i = 1; i <= projectCount; i++) {
+            Contribution[] storage contributionsForProject = projectContributions[i];
+            for (uint256 j = 0; j < contributionsForProject.length; j++) {
+                allContributions[index] = contributionsForProject[j];
+                index++;
+            }
+        }
+
+        return allContributions;
+    }
+    // Function to get the contract's balance
+    function getContractBalance() external view returns (uint256) {
+        return address(this).balance; // Returns the contract's balance
     }
 }
